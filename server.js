@@ -11,9 +11,6 @@ const PORT = process.env.PORT || 8080;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ==============================
-// URL取得
-// ==============================
 function fetchUrl(targetUrl, reqHeaders = {}) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(targetUrl);
@@ -26,13 +23,14 @@ function fetchUrl(targetUrl, reqHeaders = {}) {
       method: "GET",
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": "*/*",
         "Accept-Language": "ja,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
         "Host": parsed.hostname,
         ...(reqHeaders.cookie ? { Cookie: reqHeaders.cookie } : {}),
         ...(reqHeaders.referer ? { Referer: reqHeaders.referer } : {}),
         ...(reqHeaders.authorization ? { Authorization: reqHeaders.authorization } : {}),
+        ...(reqHeaders.origin ? { Origin: reqHeaders.origin } : {}),
       },
     };
     const req = lib.request(options, (res) => {
@@ -52,68 +50,74 @@ function fetchUrl(targetUrl, reqHeaders = {}) {
   });
 }
 
-// ==============================
-// URLをプロキシ経由に書き換え
-// ==============================
 function toProxyUrl(url, origin, toppings, css, js) {
   try {
     let abs = url;
     if (url.startsWith("//")) abs = "https:" + url;
     else if (url.startsWith("/")) abs = origin + url;
     else if (!url.startsWith("http")) abs = origin + "/" + url;
-    return `/proxy?url=${encodeURIComponent(abs)}&toppings=${toppings}&css=${css}&js=${js}`;
+    return `/proxy?url=${encodeURIComponent(abs)}&toppings=${toppings}&css=${encodeURIComponent(css||"")}&js=${encodeURIComponent(js||"")}`;
   } catch(e) { return url; }
 }
 
-// ==============================
-// HTML書き換え
-// ==============================
 function rewriteHtml(html, origin, toppings, css, js) {
   const tp = toppings.join(",");
 
   html = html.replace(/<base[^>]*>/gi, "");
-  html = html.replace(/(<head[^>]*>)/i, `$1<base href="${origin}/">`);
 
-  // link href
   html = html.replace(/(<link[^>]+href=['"])([^'"]+)(['"])/gi, (m, pre, url, post) => {
     if (url.startsWith("data:") || url.startsWith("#")) return m;
     return pre + toProxyUrl(url, origin, tp, css, js) + post;
   });
 
-  // script src
   html = html.replace(/(<script[^>]+src=['"])([^'"]+)(['"])/gi, (m, pre, url, post) => {
     if (url.startsWith("data:")) return m;
     return pre + toProxyUrl(url, origin, tp, css, js) + post;
   });
 
-  // img src
   html = html.replace(/(<img[^>]+src=['"])([^'"]+)(['"])/gi, (m, pre, url, post) => {
     if (url.startsWith("data:")) return m;
     return pre + toProxyUrl(url, origin, tp, css, js) + post;
   });
 
-  // a href
   html = html.replace(/(<a[^>]+href=['"])([^'"#][^'"]*?)(['"])/gi, (m, pre, url, post) => {
     if (url.startsWith("mailto:") || url.startsWith("tel:") || url.startsWith("javascript")) return m;
     return pre + toProxyUrl(url, origin, tp, css, js) + post;
   });
 
-  // form action
   html = html.replace(/(<form[^>]+action=['"])([^'"]+)(['"])/gi, (m, pre, url, post) => {
     return pre + toProxyUrl(url, origin, tp, css, js) + post;
   });
 
-  // srcset
-  html = html.replace(/srcset=['"]([^'"]+)['"]/gi, (m, srcset) => {
-    const rewritten = srcset.replace(/([\^\s,]+)(\s*(?:\d+[wx])?)/g, (sm, url, desc) => {
-      url = url.trim();
-      if (!url || url.startsWith("data:")) return sm;
-      return " " + toProxyUrl(url, origin, tp, css, js) + desc;
-    });
-    return `srcset="${rewritten}"`;
-  });
+  // fetch/XHRをフックするスクリプトを最初に注入
+  const fetchHook = `<script>
+(function() {
+  const PROXY = "/proxy?url=";
+  const _fetch = window.fetch;
+  window.fetch = function(url, opts) {
+    if (typeof url === "string" && url.startsWith("http") && !url.includes(location.hostname)) {
+      url = PROXY + encodeURIComponent(url);
+    }
+    return _fetch.call(this, url, opts);
+  };
+  const _open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url, ...args) {
+    if (typeof url === "string" && url.startsWith("http") && !url.includes(location.hostname)) {
+      url = PROXY + encodeURIComponent(url);
+    }
+    return _open.call(this, method, url, ...args);
+  };
+})();
+</script>`;
 
-  // トッピングスクリプト注入
+  if (html.includes("<head>")) {
+    html = html.replace("<head>", "<head>" + fetchHook);
+  } else if (html.includes("<head")) {
+    html = html.replace(/<head[^>]*>/, (m) => m + fetchHook);
+  } else {
+    html = fetchHook + html;
+  }
+
   const script = buildToppingScript(toppings, css, js);
   if (html.includes("</body>")) {
     html = html.replace(/<\/body>/i, `${script}</body>`);
@@ -124,20 +128,19 @@ function rewriteHtml(html, origin, toppings, css, js) {
   return html;
 }
 
-// ==============================
-// CSS書き換え
-// ==============================
-function rewriteCss(css, origin, toppings, customCss, customJs) {
+function rewriteCss(cssText, origin, toppings, css, js) {
   const tp = toppings.join(",");
-  return css.replace(/url\(['"]?([^'")]+)['"]?\)/gi, (m, url) => {
+  return cssText.replace(/url\(['"]?([^'")]+)['"]?\)/gi, (m, url) => {
     if (url.startsWith("data:") || url.startsWith("#")) return m;
-    return `url("${toProxyUrl(url, origin, tp, customCss, customJs)}")`;
+    return `url("${toProxyUrl(url, origin, tp, css, js)}")`;
   });
 }
 
-// ==============================
-// トッピングスクリプト
-// ==============================
+function rewriteJs(jsText, origin, toppings, css, js) {
+  // JS内のfetch/XHRは実行時にフックするので、ここではURLの静的書き換えのみ
+  return jsText;
+}
+
 function buildToppingScript(toppings, customCSS, customJS) {
   const flags = {
     darkMode: toppings.includes("darkMode"),
@@ -192,9 +195,6 @@ function buildToppingScript(toppings, customCSS, customJS) {
 </script>`;
 }
 
-// ==============================
-// プロキシエンドポイント
-// ==============================
 app.get("/proxy", async (req, res) => {
   let { url, toppings: tp, css, js } = req.query;
   if (!url) return res.status(400).json({ error: "url required" });
@@ -206,10 +206,14 @@ app.get("/proxy", async (req, res) => {
     const result = await fetchUrl(url, req.headers);
     const ct = result.headers["content-type"] || "";
 
-    // CSP完全無効化
+    // 全セキュリティヘッダーを削除
     res.removeHeader("content-security-policy");
     res.removeHeader("x-frame-options");
     res.removeHeader("x-content-type-options");
+    res.removeHeader("strict-transport-security");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
 
     // Cookie転送
     if (result.headers["set-cookie"]) {
@@ -246,6 +250,13 @@ app.get("/proxy", async (req, res) => {
       cssText = rewriteCss(cssText, origin, toppings, css || "", js || "");
       res.setHeader("Content-Type", "text/css; charset=utf-8");
       res.status(result.status).send(cssText);
+    } else if (ct.includes("javascript")) {
+      let jsText = result.body.toString("utf-8");
+      res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+      res.status(result.status).send(jsText);
+    } else if (ct.includes("application/json")) {
+      res.setHeader("Content-Type", "application/json");
+      res.status(result.status).send(result.body);
     } else {
       const safe = ["content-type","cache-control","etag","last-modified"];
       safe.forEach(h => { if(result.headers[h]) res.setHeader(h, result.headers[h]); });
