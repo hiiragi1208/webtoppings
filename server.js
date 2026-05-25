@@ -63,30 +63,35 @@ function toProxyUrl(url, pageUrl, tp, css, js) {
   return `/proxy?url=${encodeURIComponent(abs)}&toppings=${encodeURIComponent(tp||"")}&css=${encodeURIComponent(css||"")}&js=${encodeURIComponent(js||"")}`;
 }
 
-// JSファイル内のAPIドメインをプロキシURLに書き換え
 function rewriteJs(jsText, pageUrl, tp) {
+  let result = jsText;
+
+  // APIドメインを書き換え
   const apiDomains = [
     "api.prod.cloudmoonapp.com",
     "api.cloudmoon.cloudbatata.com",
     "shop.cloudmoonapp.com",
   ];
-  let result = jsText;
   for (const domain of apiDomains) {
-    // "https://domain" → "/proxy?url=https%3A%2F%2Fdomain"
-    const escaped = domain.replace(/\./g, "\\.");
     result = result.replace(
-      new RegExp(`"https://${escaped}`, "g"),
-      `"/proxy?url=https%3A%2F%2F${domain}`
-    );
-    result = result.replace(
-      new RegExp(`'https://${escaped}`, "g"),
-      `'/proxy?url=https%3A%2F%2F${domain}`
-    );
-    result = result.replace(
-      new RegExp("`https://${escaped}", "g"),
-      "`/proxy?url=https%3A%2F%2F${domain}"
+      new RegExp(`https://${domain.replace(/\./g, "\\.")}`, "g"),
+      `/proxy?url=https%3A%2F%2F${domain}`
     );
   }
+
+  // ES Module の相対import/exportパスをプロキシURLに書き換え
+  // from"../chunks/xxx" → from"/proxy?url=絶対URL"
+  // from"./xxx" → from"/proxy?url=絶対URL"
+  result = result.replace(
+    /(?:from|import)\s*["'](\.\.[^"']+|\.\/[^"']+)["']/g,
+    (m, relPath) => {
+      const abs = resolveUrl(relPath, pageUrl);
+      if (!abs) return m;
+      const proxyUrl = `/proxy?url=${encodeURIComponent(abs)}&toppings=${encodeURIComponent(tp||"")}`;
+      return m.replace(relPath, proxyUrl);
+    }
+  );
+
   return result;
 }
 
