@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>🍕 WebToppings</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#0d0c0a;--surface:#181610;--surface2:#221f18;--border:#2e2a20;--accent:#f5a623;--accent2:#e8522a;--text:#f0ead8;--muted:#7a7260}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans JP',sans-serif;min-height:100vh}
+header{text-align:center;padding:60px 24px 40px}
+.logo{font-size:48px;animation:spin 8s linear infinite;display:inline-block;filter:drop-shadow(0 0 20px rgba(245,166,35,0.5))}
+@keyframes spin{to{transform:rotate(360deg)}}
+h1{font-family:'Syne',sans-serif;font-weight:800;font-size:clamp(2rem,7vw,4rem);background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.tagline{color:var(--muted);margin-top:8px;font-size:1rem}
+main{max-width:700px;margin:0 auto;padding:0 20px 80px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;margin-bottom:20px}
+.card-title{font-size:0.7rem;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+.url-row{display:flex;gap:10px}
+.url-input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:1rem;font-family:'Noto Sans JP',sans-serif;color:var(--text);outline:none;transition:border-color .2s}
+.url-input::placeholder{color:var(--muted)}
+.url-input:focus{border-color:var(--accent)}
+.go-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:10px;padding:12px 24px;font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;cursor:pointer;white-space:nowrap}
+.toppings-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.topping-item{display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;cursor:pointer;user-select:none}
+.topping-item input{display:none}
+.topping-item.active{border-color:var(--accent);background:rgba(245,166,35,0.06)}
+.topping-check{width:18px;height:18px;border:1.5px solid var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px}
+.topping-item.active .topping-check{background:var(--accent);border-color:var(--accent);color:#000}
+.topping-name{font-weight:700;font-size:.85rem}
+.topping-desc{font-size:.7rem;color:var(--muted);margin-top:1px}
+.topping-emoji{font-size:1.2rem}
+.code-fields{display:none;flex-direction:column;gap:10px;margin-top:12px}
+.code-fields.visible{display:flex}
+.code-label{font-size:.75rem;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em}
+.code-input{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:.8rem;font-family:'Courier New',monospace;color:#3ecf8e;outline:none;resize:vertical;min-height:70px;width:100%}
+.preview-wrap{display:none;margin-top:20px;border-radius:14px;overflow:hidden;border:1px solid var(--border)}
+.preview-wrap.visible{display:block}
+.preview-toolbar{background:var(--surface2);border-bottom:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;gap:8px;font-size:.75rem;color:var(--muted)}
+.dots span{display:inline-block;width:10px;height:10px;border-radius:50%}
+.dots span:nth-child(1){background:#ff5f57}
+.dots span:nth-child(2){background:#febc2e}
+.dots span:nth-child(3){background:#28c840}
+.url-bar{flex:1;background:var(--surface);border-radius:6px;padding:4px 10px;font-size:.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+iframe{display:block;width:100%;height:60vh;border:none}
+</style>
+</head>
+<body>
+<header>
+  <div><span class="logo">🍕</span></div>
+  <h1>WebToppings</h1>
+  <p class="tagline">ブラウジングをスパイスアップ — インストール不要・完全無料</p>
+</header>
+<main>
+  <div class="card">
+    <div class="card-title">▸ アクセスするURL</div>
+    <div class="url-row">
+      <input class="url-input" id="urlInput" type="text" placeholder="https://example.com" autocomplete="off"/>
+      <button class="go-btn" id="goBtn">アクセス ›</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">▸ トッピングを選ぶ</div>
+    <div class="toppings-grid">
+      <label class="topping-item" data-id="darkMode"><input type="checkbox" value="darkMode"/><span class="topping-emoji">🌙</span><div><div class="topping-name">ダークモード</div><div class="topping-desc">強制的に暗くする</div></div><div class="topping-check">✓</div></label>
+      <label class="topping-item" data-id="adBlock"><input type="checkbox" value="adBlock"/><span class="topping-emoji">🛡️</span><div><div class="topping-name">広告ブロック</div><div class="topping-desc">広告を非表示</div></div><div class="topping-check">✓</div></label>
+      <label class="topping-item" data-id="translate"><input type="checkbox" value="translate"/><span class="topping-emoji">🌐</span><div><div class="topping-name">翻訳</div><div class="topping-desc">Google翻訳へ</div></div><div class="topping-check">✓</div></label>
+      <label class="topping-item" data-id="readingMode"><input type="checkbox" value="readingMode"/><span class="topping-emoji">📖</span><div><div class="topping-name">リーディング</div><div class="topping-desc">本文だけ抽出</div></div><div class="topping-check">✓</div></label>
+      <label class="topping-item" data-id="customCode"><input type="checkbox" value="customCode"/><span class="topping-emoji">🎨</span><div><div class="topping-name">カスタム</div><div class="topping-desc">CSS/JS注入</div></div><div class="topping-check">✓</div></label>
+    </div>
+    <div class="code-fields" id="codeFields">
+      <div><div class="code-label">カスタム CSS</div><textarea class="code-input" id="customCss" placeholder="body { font-size: 18px; }"></textarea></div>
+      <div><div class="code-label">カスタム JS</div><textarea class="code-input" id="customJs" placeholder="console.log('Hello!');"></textarea></div>
+    </div>
+  </div>
+  <div class="preview-wrap" id="previewWrap">
+    <div class="preview-toolbar">
+      <div class="dots"><span></span><span></span><span></span></div>
+      <div class="url-bar" id="previewUrlBar">—</div>
+      <a id="openExternal" href="#" target="_blank" style="color:var(--muted);text-decoration:none;font-size:11px">↗ 新しいタブ</a>
+    </div>
+    <iframe id="previewFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+  </div>
+</main>
+<script>
+document.querySelectorAll('.topping-item').forEach(item=>{
+  item.addEventListener('click',()=>{
+    const cb=item.querySelector('input');
+    cb.checked=!cb.checked;
+    item.classList.toggle('active',cb.checked);
+    if(item.dataset.id==='customCode') document.getElementById('codeFields').classList.toggle('visible',cb.checked);
+  });
+});
+function getToppings(){return Array.from(document.querySelectorAll('.topping-item.active input')).map(e=>e.value);}
+document.getElementById('goBtn').addEventListener('click',load);
+document.getElementById('urlInput').addEventListener('keydown',e=>{if(e.key==='Enter')load();});
+function load(){
+  let url=document.getElementById('urlInput').value.trim();
+  if(!url)return;
+  if(!/^https?:\/\//.test(url))url='https://'+url;
+  const t=getToppings().join(',');
+  const css=encodeURIComponent(document.getElementById('customCss').value);
+  const js=encodeURIComponent(document.getElementById('customJs').value);
+  const proxyUrl='/proxy?url='+encodeURIComponent(url)+'&toppings='+t+'&css='+css+'&js='+js;
+  document.getElementById('previewWrap').classList.add('visible');
+  document.getElementById('previewUrlBar').textContent=url;
+  document.getElementById('openExternal').href=proxyUrl;
+  document.getElementById('previewFrame').src=proxyUrl;
+}
+</script>
+</body>
+</html>
