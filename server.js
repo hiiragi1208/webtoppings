@@ -53,9 +53,7 @@ function resolveUrl(url, pageUrl) {
   try {
     if (!url || typeof url !== "string") return null;
     if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("javascript:") || url.startsWith("mailto:") || url.startsWith("tel:") || url.startsWith("#")) return null;
-    // new URL で相対パス・../を全て解決
-    const resolved = new URL(url, pageUrl);
-    return resolved.href;
+    return new URL(url, pageUrl).href;
   } catch(e) { return null; }
 }
 
@@ -63,6 +61,33 @@ function toProxyUrl(url, pageUrl, tp, css, js) {
   const abs = resolveUrl(url, pageUrl);
   if (!abs) return url;
   return `/proxy?url=${encodeURIComponent(abs)}&toppings=${encodeURIComponent(tp||"")}&css=${encodeURIComponent(css||"")}&js=${encodeURIComponent(js||"")}`;
+}
+
+// JSファイル内のAPIドメインをプロキシURLに書き換え
+function rewriteJs(jsText, pageUrl, tp) {
+  const apiDomains = [
+    "api.prod.cloudmoonapp.com",
+    "api.cloudmoon.cloudbatata.com",
+    "shop.cloudmoonapp.com",
+  ];
+  let result = jsText;
+  for (const domain of apiDomains) {
+    // "https://domain" → "/proxy?url=https%3A%2F%2Fdomain"
+    const escaped = domain.replace(/\./g, "\\.");
+    result = result.replace(
+      new RegExp(`"https://${escaped}`, "g"),
+      `"/proxy?url=https%3A%2F%2F${domain}`
+    );
+    result = result.replace(
+      new RegExp(`'https://${escaped}`, "g"),
+      `'/proxy?url=https%3A%2F%2F${domain}`
+    );
+    result = result.replace(
+      new RegExp("`https://${escaped}", "g"),
+      "`/proxy?url=https%3A%2F%2F${domain}"
+    );
+  }
+  return result;
 }
 
 function rewriteHtml(html, pageUrl, toppings, css, js) {
@@ -108,7 +133,6 @@ function rewriteHtml(html, pageUrl, toppings, css, js) {
   }
   const PROXY_BASE = "/proxy?url=";
   const TP = ${JSON.stringify(tp)};
-  const PAGE_ORIGIN = ${JSON.stringify(new URL(pageUrl).origin)};
   function shouldProxy(url) {
     if (!url || typeof url !== "string") return false;
     if (url.startsWith("/proxy?")) return false;
@@ -268,8 +292,10 @@ app.get("/proxy", async (req, res) => {
       res.setHeader("Content-Type", "text/css; charset=utf-8");
       res.status(result.status).send(cssText);
     } else if (ct.includes("javascript")) {
+      let jsText = result.body.toString("utf-8");
+      jsText = rewriteJs(jsText, url, tp || "");
       res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-      res.status(result.status).send(result.body);
+      res.status(result.status).send(jsText);
     } else if (ct.includes("application/json")) {
       res.setHeader("Content-Type", "application/json");
       res.status(result.status).send(result.body);
