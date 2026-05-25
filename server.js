@@ -49,98 +49,96 @@ function fetchUrl(targetUrl, reqHeaders = {}) {
   });
 }
 
-function resolveUrl(url, origin, pageUrl) {
+function resolveUrl(url, pageUrl) {
   try {
-    if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("javascript:") || url.startsWith("mailto:") || url.startsWith("tel:")) return null;
-    if (url.startsWith("//")) return "https:" + url;
-    if (url.startsWith("http")) return url;
-    if (url.startsWith("/")) return origin + url;
-    // 相対パス（../や./）の解決
-    const base = pageUrl || origin + "/";
-    return new URL(url, base).href;
+    if (!url || typeof url !== "string") return null;
+    if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("javascript:") || url.startsWith("mailto:") || url.startsWith("tel:") || url.startsWith("#")) return null;
+    // new URL で相対パス・../を全て解決
+    const resolved = new URL(url, pageUrl);
+    return resolved.href;
   } catch(e) { return null; }
 }
 
-function toProxyUrl(url, origin, pageUrl, toppings, css, js) {
-  const abs = resolveUrl(url, origin, pageUrl);
+function toProxyUrl(url, pageUrl, tp, css, js) {
+  const abs = resolveUrl(url, pageUrl);
   if (!abs) return url;
-  return `/proxy?url=${encodeURIComponent(abs)}&toppings=${encodeURIComponent(toppings||"")}&css=${encodeURIComponent(css||"")}&js=${encodeURIComponent(js||"")}`;
+  return `/proxy?url=${encodeURIComponent(abs)}&toppings=${encodeURIComponent(tp||"")}&css=${encodeURIComponent(css||"")}&js=${encodeURIComponent(js||"")}`;
 }
 
-function rewriteHtml(html, origin, pageUrl, toppings, css, js) {
+function rewriteHtml(html, pageUrl, toppings, css, js) {
   const tp = Array.isArray(toppings) ? toppings.join(",") : (toppings||"");
 
   html = html.replace(/<base[^>]*>/gi, "");
 
-  // link href (stylesheet, modulepreload, preload)
   html = html.replace(/(<link[^>]+href=["'])([^"']+)(["'])/gi, (m, pre, url, post) => {
-    const abs = resolveUrl(url, origin, pageUrl);
+    const abs = resolveUrl(url, pageUrl);
     if (!abs) return m;
-    return pre + toProxyUrl(url, origin, pageUrl, tp, css, js) + post;
+    return pre + toProxyUrl(url, pageUrl, tp, css, js) + post;
   });
 
-  // script src
   html = html.replace(/(<script[^>]+src=["'])([^"']+)(["'])/gi, (m, pre, url, post) => {
-    const abs = resolveUrl(url, origin, pageUrl);
+    const abs = resolveUrl(url, pageUrl);
     if (!abs) return m;
-    return pre + toProxyUrl(url, origin, pageUrl, tp, css, js) + post;
+    return pre + toProxyUrl(url, pageUrl, tp, css, js) + post;
   });
 
-  // img src
   html = html.replace(/(<img[^>]+src=["'])([^"']+)(["'])/gi, (m, pre, url, post) => {
-    const abs = resolveUrl(url, origin, pageUrl);
+    const abs = resolveUrl(url, pageUrl);
     if (!abs) return m;
-    return pre + toProxyUrl(url, origin, pageUrl, tp, css, js) + post;
+    return pre + toProxyUrl(url, pageUrl, tp, css, js) + post;
   });
 
-  // a href
   html = html.replace(/(<a[^>]+href=["'])([^"'#][^"']*?)(["'])/gi, (m, pre, url, post) => {
     if (url.startsWith("mailto:") || url.startsWith("tel:") || url.startsWith("javascript")) return m;
-    const abs = resolveUrl(url, origin, pageUrl);
+    const abs = resolveUrl(url, pageUrl);
     if (!abs) return m;
-    return pre + toProxyUrl(url, origin, pageUrl, tp, css, js) + post;
+    return pre + toProxyUrl(url, pageUrl, tp, css, js) + post;
   });
 
-  // form action
   html = html.replace(/(<form[^>]+action=["'])([^"']+)(["'])/gi, (m, pre, url, post) => {
-    const abs = resolveUrl(url, origin, pageUrl);
+    const abs = resolveUrl(url, pageUrl);
     if (!abs) return m;
-    return pre + toProxyUrl(url, origin, pageUrl, tp, css, js) + post;
+    return pre + toProxyUrl(url, pageUrl, tp, css, js) + post;
   });
 
-  // fetch/XHRフック + Service Worker無効化
   const fetchHook = `<script>
 (function() {
-  // Service Worker無効化
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
   }
-  const PROXY = "/proxy?url=";
+  const PROXY_BASE = "/proxy?url=";
   const TP = ${JSON.stringify(tp)};
+  const PAGE_ORIGIN = ${JSON.stringify(new URL(pageUrl).origin)};
+  function shouldProxy(url) {
+    if (!url || typeof url !== "string") return false;
+    if (url.startsWith("/proxy?")) return false;
+    if (url.startsWith("data:") || url.startsWith("blob:")) return false;
+    try {
+      const u = new URL(url, location.href);
+      return u.origin !== location.origin;
+    } catch(e) { return false; }
+  }
   function proxyUrl(url) {
-    if (!url || typeof url !== "string") return url;
-    if (url.startsWith("/proxy?")) return url;
-    if (url.startsWith("http") && !url.includes(location.hostname)) {
-      return PROXY + encodeURIComponent(url) + "&toppings=" + encodeURIComponent(TP);
-    }
-    if (url.startsWith("//")) {
-      return PROXY + encodeURIComponent("https:" + url) + "&toppings=" + encodeURIComponent(TP);
-    }
-    return url;
+    if (!shouldProxy(url)) return url;
+    try {
+      const abs = new URL(url, location.href).href;
+      return PROXY_BASE + encodeURIComponent(abs) + "&toppings=" + encodeURIComponent(TP);
+    } catch(e) { return url; }
   }
   const _fetch = window.fetch.bind(window);
-  window.fetch = function(url, opts) {
-    if (url && typeof url === "string") url = proxyUrl(url);
-    else if (url && url.url) url = new Request(proxyUrl(url.url), url);
-    return _fetch(url, opts);
+  window.fetch = function(input, opts) {
+    if (typeof input === "string") input = proxyUrl(input);
+    else if (input instanceof Request) {
+      const newUrl = proxyUrl(input.url);
+      if (newUrl !== input.url) input = new Request(newUrl, input);
+    }
+    return _fetch(input, opts);
   };
   const _open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url, ...args) {
-    if (url) url = proxyUrl(url);
+    if (url) url = proxyUrl(String(url));
     return _open.call(this, method, url, ...args);
   };
-  // WebSocket無効化（ゲーム映像配信には対応不可）
-  // window.WebSocket = function() { console.log("WebSocket blocked"); };
 })();
 </script>`;
 
@@ -152,18 +150,19 @@ function rewriteHtml(html, origin, pageUrl, toppings, css, js) {
     html = fetchHook + html;
   }
 
-  const script = buildToppingScript(Array.isArray(toppings) ? toppings : tp.split(",").filter(Boolean), css, js);
+  const toppingArr = Array.isArray(toppings) ? toppings : tp.split(",").filter(Boolean);
+  const script = buildToppingScript(toppingArr, css, js);
   html = html.includes("</body>") ? html.replace(/<\/body>/i, `${script}</body>`) : html + script;
 
   return html;
 }
 
-function rewriteCss(cssText, origin, pageUrl, toppings, css, js) {
+function rewriteCss(cssText, pageUrl, toppings, css, js) {
   const tp = Array.isArray(toppings) ? toppings.join(",") : (toppings||"");
   return cssText.replace(/url\(["']?([^"')]+)["']?\)/gi, (m, url) => {
-    const abs = resolveUrl(url, origin, pageUrl);
+    const abs = resolveUrl(url, pageUrl);
     if (!abs) return m;
-    return `url("${toProxyUrl(url, origin, pageUrl, tp, css, js)}")`;
+    return `url("${toProxyUrl(url, pageUrl, tp, css, js)}")`;
   });
 }
 
@@ -250,26 +249,22 @@ app.get("/proxy", async (req, res) => {
       res.setHeader("set-cookie", rewritten);
     }
 
-    const parsed = new URL(url);
-    const origin = `${parsed.protocol}//${parsed.hostname}`;
-    const pageUrl = url;
-
     if ([301,302,303,307,308].includes(result.status)) {
       const location = result.headers.location;
       if (location) {
-        const absLocation = resolveUrl(location, origin, pageUrl) || location;
-        return res.redirect(result.status, `/proxy?url=${encodeURIComponent(absLocation)}&toppings=${tp||""}&css=${css||""}&js=${js||""}`);
+        const abs = resolveUrl(location, url) || location;
+        return res.redirect(result.status, `/proxy?url=${encodeURIComponent(abs)}&toppings=${tp||""}&css=${css||""}&js=${js||""}`);
       }
     }
 
     if (ct.includes("text/html")) {
       let html = result.body.toString("utf-8");
-      html = rewriteHtml(html, origin, pageUrl, toppings, css || "", js || "");
+      html = rewriteHtml(html, url, toppings, css || "", js || "");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(result.status).send(html);
     } else if (ct.includes("text/css")) {
       let cssText = result.body.toString("utf-8");
-      cssText = rewriteCss(cssText, origin, pageUrl, toppings, css || "", js || "");
+      cssText = rewriteCss(cssText, url, toppings, css || "", js || "");
       res.setHeader("Content-Type", "text/css; charset=utf-8");
       res.status(result.status).send(cssText);
     } else if (ct.includes("javascript")) {
